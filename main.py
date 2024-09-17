@@ -93,7 +93,7 @@ def test_local_image_detection(image_path):
 
 if __name__ == "__main__":
     # Test local image detection
-    # test_image_path = "/Users/mibsib/Desktop/tmp/tmpimages/clock.jpg"  # Replace with the path to your test image
+    # test_image_path = "/Desktop/tmp/tmpimages/clock.jpg"  # Replace with the path to your test image
     # if os.path.exists(test_image_path):
     #     test_local_image_detection(test_image_path)
     # else:
