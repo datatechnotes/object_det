@@ -1,14 +1,12 @@
 import os
-from fastapi import FastAPI, File, UploadFile
+import io
+from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.exceptions import RequestValidationError
-from starlette.exceptions import HTTPException as StarletteHTTPException
 import torch
 from torchvision import models, transforms
 from torchvision.models import ResNet50_Weights
 from PIL import Image
-import io
 
 app = FastAPI()
 
@@ -39,8 +37,10 @@ def process_image(image):
     image_tensor = transform(image).unsqueeze(0)
     with torch.no_grad():
         output = model(image_tensor)
+    probabilities = torch.nn.functional.softmax(output[0], dim=0)
     _, predicted_idx = torch.max(output, 1)
-    return class_idx[predicted_idx.item()]
+    confidence = probabilities[predicted_idx].item()
+    return class_idx[predicted_idx.item()], confidence
 
 @app.get("/")
 async def read_index():
@@ -48,32 +48,28 @@ async def read_index():
 
 @app.post("/detect")
 async def detect_objects(file: UploadFile = File(...)):
-    image_data = await file.read()
-    image = Image.open(io.BytesIO(image_data)).convert('RGB')
-    class_name = process_image(image)
-    return JSONResponse(content={"detected_object": class_name})
+    try:
+        contents = await file.read()
+        image = Image.open(io.BytesIO(contents)).convert('RGB')
+        class_name, confidence = process_image(image)
+        return JSONResponse(content={"detected_object": class_name, "confidence": f"{confidence:.2%}"})
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error processing image: {str(e)}")
 
-@app.exception_handler(StarletteHTTPException)
-async def http_exception_handler(request, exc):
-    return JSONResponse(content={"error": str(exc.detail)}, status_code=exc.status_code)
-
-@app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request, exc):
-    return JSONResponse(content={"error": str(exc)}, status_code=400)
-
-def test_local_image_detection(image_path):
-    image = Image.open(image_path).convert('RGB')
-    class_name = process_image(image)
-    print(f"Detected object in {image_path}: {class_name}")
+@app.post("/api/classify")
+async def classify_image(file: UploadFile = File(...)):
+    try:
+        contents = await file.read()
+        image = Image.open(io.BytesIO(contents)).convert('RGB')
+        class_name, confidence = process_image(image)
+        return JSONResponse(content={
+            "class_label": class_name,
+            "confidence": f"{confidence:.2%}"
+        })
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error processing image: {str(e)}")
 
 if __name__ == "__main__":
-    # Test local image detection
-    # test_image_path = "/Desktop/tmp/tmpimages/clock.jpg"  # Replace with the path to your test image
-    # if os.path.exists(test_image_path):
-    #     test_local_image_detection(test_image_path)
-    # else:
-    #     print(f"Test image not found at {test_image_path}")
-
     import uvicorn
-    port = int(os.environ.get("PORT", 8009))
+    port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
